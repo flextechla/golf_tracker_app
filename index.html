@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Golf Tracker - WHS Edition</title>
+    <title>Smart Golf Tracker - WHS Multi-User Edition</title>
     <style>
         :root {
             --green: #2c7744;
@@ -25,6 +25,33 @@
         .hcp-val { font-size: 2.5rem; font-weight: 800; line-height: 1; }
         .hcp-label { font-size: 0.7rem; text-transform: uppercase; font-weight: bold; margin-top: 2px; }
 
+        /* USER ID Styling */
+        .user-input-box { 
+            background: #f0f8ff; 
+            padding: 10px; 
+            border-radius: 8px; 
+            color: #333; 
+            margin-top: 15px;
+            margin-bottom: 5px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .user-input-box label {
+            font-weight: 500; 
+            font-size: 0.8rem; 
+            color: #333; 
+            display: block; 
+            margin-bottom: 5px; 
+            margin-top: 0;
+        }
+        .user-input-box input {
+            width: 95%; 
+            padding: 8px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            color: #121212;
+            font-weight: 600;
+        }
+
         /* Form Area */
         .form-area { padding: 20px; }
         label { font-weight: 600; font-size: 0.85rem; color: #666; display: block; margin-top: 15px; margin-bottom: 5px; }
@@ -40,7 +67,6 @@
             border-color: #c8e6c9; 
             color: var(--green); 
             font-weight: bold; 
-            /* To make the readOnly field look slightly different */
             opacity: 0.9;
         }
 
@@ -73,7 +99,12 @@
                 <div class="hcp-label">Index</div>
             </div>
             <div style="font-size: 0.8rem; opacity: 0.9;">Based on World Handicap System™ logic</div>
-        </div>
+            
+            <div class="user-input-box">
+                <label for="userID">ENTER YOUR GOLFER ID / NAME (e.g. John, Sara)</label>
+                <input type="text" id="userID" placeholder="Your Name or ID" onchange="loadUserData()">
+            </div>
+            </div>
 
         <div class="form-area">
             <label>WHERE DID YOU PLAY?</label>
@@ -95,278 +126,3 @@
                     <input type="number" id="ratingInput" placeholder="72.0" step="0.1">
                 </div>
                 <div>
-                    <label>SLOPE</label>
-                    <input type="number" id="slopeInput" placeholder="113" type="number">
-                </div>
-            </div>
-
-            <div class="rating-row">
-                <div>
-                    <label>TOTAL SCORE</label>
-                    <input type="number" id="scoreInput" placeholder="88">
-                </div>
-                <div>
-                    <label>DATE</label>
-                    <input type="date" id="dateInput">
-                </div>
-            </div>
-
-            <button class="btn-main" onclick="submitRound()">POST SCORE</button>
-        </div>
-
-        <div class="history-section">
-            <h3 style="margin-top:0; font-size:0.9rem; color:#666; text-transform:uppercase;">Recent Rounds</h3>
-            <div id="historyList"></div>
-        </div>
-    </div>
-
-    <script>
-        // --- COURSE DATA ---
-        // Placeholder data. **Confirm these Rating/Slope values are accurate for your tees.**
-        const INITIAL_COURSES = [
-            { name: "The Island (Plaquemine, LA)", tee: "Blue", rating: 73.1, slope: 135 },
-            { name: "The Island (Plaquemine, LA)", tee: "White", rating: 71.3, slope: 130 },
-            { name: "Greystone (Denham Springs, LA)", tee: "Gold", rating: 72.5, slope: 132 },
-            { name: "Greystone (Denham Springs, LA)", tee: "Blue", rating: 70.8, slope: 128 },
-            { name: "Coppermill", tee: "Gold", rating: 71.8, slope: 129 },
-            
-            // --- Custom Combo Courses (Averaged Rating/Slope) ---
-            // Fenwood: White (Front 9) / Blue (Back 9) - Estimated combined rating/slope
-            { name: "Fenwood (Zachary, LA)", tee: "White/Blue Combo", rating: 71.0, slope: 127.5 },
-
-            // The Pines: White (Front 9) / Blue (Back 9) - Estimated combined rating/slope
-            { name: "The Pines (Denham Springs, LA)", tee: "White/Blue Combo", rating: 70.5, slope: 125 },
-
-            // Oak Lake: White (Front 9) / Blue (Back 9) - Estimated combined rating/slope
-            { name: "Oak Lake (Clinton, LA)", tee: "White/Blue Combo", rating: 69.8, slope: 122 },
-            
-            // --- Courses with Estimated Data (Need Confirmation) ---
-            { name: "Beaver Creek", tee: "Blue", rating: 72.0, slope: 130 },
-            { name: "Santa Maria", tee: "Blue", rating: 71.5, slope: 128 },
-            { name: "JS Clark (Baker, LA)", tee: "White", rating: 68.5, slope: 120 },
-            { name: "Belle Terre (Laplace, LA)", tee: "Blue", rating: 72.2, slope: 131 },
-            { name: "Oak Knoll (Hammond, LA)", tee: "White", rating: 70.1, slope: 124 },
-            { name: "Covington Country Club", tee: "Blue", rating: 71.9, slope: 127 },
-            { name: "Webb (Baton Rouge)", tee: "White", rating: 69.5, slope: 123 },
-            { name: "City Park (Baton Rouge)", tee: "Blue", rating: 70.0, slope: 125 }
-        ];
-
-        // --- DATABASE ---
-        // myCourseTees holds the list of all Course/Tee combos
-        let courseTees = JSON.parse(localStorage.getItem('myCourseTees')) || [];
-        // savedRounds holds the historical scores
-        let savedRounds = JSON.parse(localStorage.getItem('mySavedRounds')) || [];
-
-        // Initialize
-        window.onload = function() {
-            // Load initial course data only if localStorage is empty
-            if (courseTees.length === 0) {
-                courseTees = INITIAL_COURSES;
-                localStorage.setItem('myCourseTees', JSON.stringify(courseTees));
-            }
-            
-            renderDropdown();
-            renderHistory();
-            calculateHandicap();
-            document.getElementById('dateInput').valueAsDate = new Date();
-        };
-
-        // --- COURSE MANAGEMENT ---
-        function renderDropdown() {
-            const dd = document.getElementById('courseDropdown');
-            // Clear current options except the first two defaults
-            dd.innerHTML = `
-                <option value="">-- Select a Course/Tee Combo --</option>
-                <option value="NEW_COURSE" style="font-weight:bold; color:green;">+ Add New Course / Tees...</option>
-            `;
-            
-            // Populate dropdown from the courseTees list
-            courseTees.forEach((c, index) => {
-                let option = document.createElement('option');
-                option.value = index;
-                // Display both Course Name and Tee Box
-                option.text = `${c.name} (${c.tee})`;
-                dd.appendChild(option);
-            });
-        }
-
-        function handleCourseChange() {
-            const val = document.getElementById('courseDropdown').value;
-            const newBox = document.getElementById('newCourseSection');
-            const rInput = document.getElementById('ratingInput');
-            const sInput = document.getElementById('slopeInput');
-
-            if (val === "NEW_COURSE") {
-                // Show New Course Inputs
-                newBox.classList.add('active');
-                rInput.value = "";
-                sInput.value = "";
-                rInput.classList.remove('auto-filled');
-                sInput.classList.remove('auto-filled');
-                rInput.readOnly = false;
-                sInput.readOnly = false;
-            } else if (val !== "") {
-                // Load Saved Data from the courseTees array
-                newBox.classList.remove('active');
-                const course = courseTees[val];
-                
-                rInput.value = course.rating;
-                sInput.value = course.slope;
-                
-                // Visual cues that data was pulled and lock the fields
-                rInput.classList.add('auto-filled');
-                sInput.classList.add('auto-filled');
-                rInput.readOnly = true; 
-                sInput.readOnly = true;
-            } else {
-                // Reset
-                newBox.classList.remove('active');
-                rInput.value = "";
-                sInput.value = "";
-                rInput.classList.remove('auto-filled');
-                sInput.classList.remove('auto-filled');
-                rInput.readOnly = false;
-                sInput.readOnly = false;
-            }
-        }
-
-        function googleCourse() {
-            const name = document.getElementById('newCourseName').value;
-            const query = name ? `${name} golf course scorecard rating slope` : "golf course slope rating lookup";
-            window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
-        }
-
-        // --- SCORE SUBMISSION ---
-        function submitRound() {
-            const ddVal = document.getElementById('courseDropdown').value;
-            const rating = parseFloat(document.getElementById('ratingInput').value);
-            const slope = parseFloat(document.getElementById('slopeInput').value);
-            const score = parseFloat(document.getElementById('scoreInput').value);
-            const date = document.getElementById('dateInput').value;
-
-            // Validation
-            if (!score || !rating || !slope || !date) {
-                alert("Please fill in all fields.");
-                return;
-            }
-
-            let courseName = "";
-            let teeName = "";
-
-            // Logic: Is this a new course/tee combo?
-            if (ddVal === "NEW_COURSE") {
-                courseName = document.getElementById('newCourseName').value;
-                teeName = document.getElementById('newTeeName').value;
-                
-                if (!courseName || !teeName) {
-                    alert("Please enter the new course name and tee color.");
-                    return;
-                }
-
-                // Save this new course to courseTees
-                courseTees.push({
-                    name: courseName,
-                    tee: teeName,
-                    rating: rating,
-                    slope: slope
-                });
-                localStorage.setItem('myCourseTees', JSON.stringify(courseTees));
-                
-                // Refresh dropdown and select the new entry
-                renderDropdown();
-                document.getElementById('courseDropdown').value = courseTees.length - 1;
-                handleCourseChange(); 
-            } else if (ddVal !== "") {
-                // Existing course
-                const c = courseTees[ddVal];
-                courseName = c.name;
-                teeName = c.tee;
-            } else {
-                alert("Please select a Course/Tee Combo.");
-                return;
-            }
-
-            // Calculate Differential Formula: (Score - Rating) * 113 / Slope
-            const diff = (score - rating) * 113 / slope;
-
-            // Save Round
-            const newRound = {
-                date: date,
-                course: courseName,
-                tee: teeName,
-                score: score,
-                diff: diff
-            };
-
-            savedRounds.unshift(newRound); // Add to top of list
-            localStorage.setItem('mySavedRounds', JSON.stringify(savedRounds));
-
-            // Reset Score Input
-            document.getElementById('scoreInput').value = "";
-            
-            renderHistory();
-            calculateHandicap();
-        }
-
-        // --- DISPLAY & MATH ---
-        function renderHistory() {
-            const list = document.getElementById('historyList');
-            list.innerHTML = "";
-            
-            savedRounds.forEach((r, idx) => {
-                list.innerHTML += `
-                <div class="history-item">
-                    <div>
-                        <div class="h-course">${r.course} <span style="font-weight:normal; color:#888;">(${r.tee})</span></div>
-                        <div class="h-date">${r.date} <span class="h-diff">Diff: ${r.diff.toFixed(1)}</span></div>
-                    </div>
-                    <div style="display:flex; align-items:center;">
-                        <div class="h-score">${r.score}</div>
-                        <div class="delete-x" onclick="deleteRound(${idx})">×</div>
-                    </div>
-                </div>`;
-            });
-        }
-
-        function deleteRound(index) {
-            if(confirm("Delete this score?")) {
-                savedRounds.splice(index, 1);
-                localStorage.setItem('mySavedRounds', JSON.stringify(savedRounds));
-                renderHistory();
-                calculateHandicap();
-            }
-        }
-
-        function calculateHandicap() {
-            const display = document.getElementById('displayIndex');
-            
-            if (savedRounds.length < 3) {
-                display.innerText = "--";
-                return;
-            }
-
-            // WHS Calculation: Take the best X differentials from the last 20 scores.
-            const recent = savedRounds.slice(0, 20); // Last 20 rounds
-            const diffs = recent.map(r => r.diff).sort((a,b) => a - b); // Sort low (best) to high
-            
-            let cnt = diffs.length;
-            let avg = 0;
-
-            // WHS Table Implementation: Average the best X differentials
-            if (cnt == 3) avg = diffs[0] - 2.0; // Best 1 minus 2.0
-            else if (cnt == 4) avg = diffs[0] - 1.0; // Best 1 minus 1.0
-            else if (cnt == 5) avg = diffs[0]; // Best 1
-            else if (cnt == 6) avg = (diffs[0]+diffs[1])/2 - 1.0; // Avg of Best 2 minus 1.0
-            else if (cnt >= 7 && cnt <= 8) avg = (diffs[0]+diffs[1])/2; // Avg of Best 2
-            else if (cnt >= 9 && cnt <= 11) avg = (diffs[0]+diffs[1]+diffs[2])/3; // Avg of Best 3
-            else if (cnt >= 12 && cnt <= 14) avg = diffs.slice(0,4).reduce((a,b)=>a+b,0)/4; // Avg of Best 4
-            else if (cnt >= 15 && cnt <= 16) avg = diffs.slice(0,5).reduce((a,b)=>a+b,0)/5; // Avg of Best 5
-            else if (cnt >= 17 && cnt <= 18) avg = diffs.slice(0,6).reduce((a,b)=>a+b,0)/6; // Avg of Best 6
-            else if (cnt == 19) avg = diffs.slice(0,7).reduce((a,b)=>a+b,0)/7; // Avg of Best 7
-            else avg = diffs.slice(0,8).reduce((a,b)=>a+b,0)/8; // Avg of Best 8 (for 20+ rounds)
-
-            display.innerText = avg.toFixed(1);
-        }
-    </script>
-</body>
-</html>
