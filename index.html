@@ -126,3 +126,313 @@
                     <input type="number" id="ratingInput" placeholder="72.0" step="0.1">
                 </div>
                 <div>
+                    <label>SLOPE</label>
+                    <input type="number" id="slopeInput" placeholder="113" type="number">
+                </div>
+            </div>
+
+            <div class="rating-row">
+                <div>
+                    <label>TOTAL SCORE</label>
+                    <input type="number" id="scoreInput" placeholder="88">
+                </div>
+                <div>
+                    <label>DATE</label>
+                    <input type="date" id="dateInput">
+                </div>
+            </div>
+
+            <button class="btn-main" onclick="submitRound()">POST SCORE</button>
+        </div>
+
+        <div class="history-section">
+            <h3 style="margin-top:0; font-size:0.9rem; color:#666; text-transform:uppercase;">Recent Rounds</h3>
+            <div id="historyList"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- COURSE DATA (Shared across all users) ---
+        const INITIAL_COURSES = [
+            { name: "The Island (Plaquemine, LA)", tee: "Blue", rating: 73.1, slope: 135 },
+            { name: "The Island (Plaquemine, LA)", tee: "White", rating: 71.3, slope: 130 },
+            { name: "Greystone (Denham Springs, LA)", tee: "Gold", rating: 72.5, slope: 132 },
+            { name: "Greystone (Denham Springs, LA)", tee: "Blue", rating: 70.8, slope: 128 },
+            { name: "Coppermill", tee: "Gold", rating: 71.8, slope: 129 },
+            
+            // --- Custom Combo Courses (Averaged Rating/Slope) ---
+            { name: "Fenwood (Zachary, LA)", tee: "White/Blue Combo", rating: 71.0, slope: 127.5 },
+            { name: "The Pines (Denham Springs, LA)", tee: "White/Blue Combo", rating: 70.5, slope: 125 },
+            { name: "Oak Lake (Clinton, LA)", tee: "White/Blue Combo", rating: 69.8, slope: 122 },
+            
+            // --- Courses with Estimated Data (Need Confirmation) ---
+            { name: "Beaver Creek", tee: "Blue", rating: 72.0, slope: 130 },
+            { name: "Santa Maria", tee: "Blue", rating: 71.5, slope: 128 },
+            { name: "JS Clark (Baker, LA)", tee: "White", rating: 68.5, slope: 120 },
+            { name: "Belle Terre (Laplace, LA)", tee: "Blue", rating: 72.2, slope: 131 },
+            { name: "Oak Knoll (Hammond, LA)", tee: "White", rating: 70.1, slope: 124 },
+            { name: "Covington Country Club", tee: "Blue", rating: 71.9, slope: 127 },
+            { name: "Webb (Baton Rouge)", tee: "White", rating: 69.5, slope: 123 },
+            { name: "City Park (Baton Rouge)", tee: "Blue", rating: 70.0, slope: 125 }
+        ];
+
+        // --- DATABASE & USER MANAGEMENT ---
+        let courseTees = []; // Shared list of courses
+        let savedRounds = []; // User-specific rounds
+        let currentUserID = null; // Tracks the currently logged-in user
+
+        // Helper function to create a unique storage key for each user
+        function getStorageKey(baseKey) {
+            // Converts ID to uppercase for consistent key creation
+            return currentUserID ? `${baseKey}_${currentUserID.toUpperCase()}` : baseKey;
+        }
+
+        // Saves user-specific rounds and logs the last used ID
+        function saveRounds() {
+            if (currentUserID) {
+                localStorage.setItem(getStorageKey('mySavedRounds'), JSON.stringify(savedRounds));
+                localStorage.setItem('lastUserID', currentUserID);
+            }
+        }
+
+        // Loads a user's specific data when the ID input changes or page loads
+        function loadUserData() {
+            const id = document.getElementById('userID').value.trim();
+            
+            if (id.length === 0) {
+                currentUserID = null;
+                savedRounds = [];
+            } else {
+                currentUserID = id;
+                // Load rounds specific to this ID
+                savedRounds = JSON.parse(localStorage.getItem(getStorageKey('mySavedRounds'))) || [];
+            }
+
+            // Always update UI when user changes (even if data is blank)
+            renderDropdown();
+            renderHistory();
+            calculateHandicap();
+        }
+
+        // Initialize
+        window.onload = function() {
+            // 1. FIX: Ensure the shared course list exists. We load it immediately.
+            const storedCourseTees = localStorage.getItem('myCourseTees');
+            if (storedCourseTees === null) {
+                // If it doesn't exist, set it from the embedded array
+                localStorage.setItem('myCourseTees', JSON.stringify(INITIAL_COURSES));
+                courseTees = INITIAL_COURSES;
+            } else {
+                // If it exists, load it
+                courseTees = JSON.parse(storedCourseTees);
+            }
+            // The courseTees array is now guaranteed to have data.
+
+            // 2. Try to load the last user who logged in
+            const lastID = localStorage.getItem('lastUserID');
+            if (lastID) {
+                document.getElementById('userID').value = lastID;
+            }
+            
+            // Call loadUserData to initialize the app state based on the ID (or lack thereof)
+            loadUserData(); 
+            
+            document.getElementById('dateInput').valueAsDate = new Date();
+        };
+
+        // --- COURSE MANAGEMENT ---
+        function renderDropdown() {
+            const dd = document.getElementById('courseDropdown');
+            dd.innerHTML = `
+                <option value="">-- Select a Course/Tee Combo --</option>
+                <option value="NEW_COURSE" style="font-weight:bold; color:green;">+ Add New Course / Tees...</option>
+            `;
+            
+            courseTees.forEach((c, index) => {
+                let option = document.createElement('option');
+                option.value = index;
+                option.text = `${c.name} (${c.tee})`;
+                dd.appendChild(option);
+            });
+        }
+
+        function handleCourseChange() {
+            const val = document.getElementById('courseDropdown').value;
+            const newBox = document.getElementById('newCourseSection');
+            const rInput = document.getElementById('ratingInput');
+            const sInput = document.getElementById('slopeInput');
+
+            if (val === "NEW_COURSE") {
+                newBox.classList.add('active');
+                rInput.value = "";
+                sInput.value = "";
+                rInput.classList.remove('auto-filled');
+                sInput.classList.remove('auto-filled');
+                rInput.readOnly = false;
+                sInput.readOnly = false;
+            } else if (val !== "") {
+                newBox.classList.remove('active');
+                const course = courseTees[val];
+                
+                rInput.value = course.rating;
+                sInput.value = course.slope;
+                
+                rInput.classList.add('auto-filled');
+                sInput.classList.add('auto-filled');
+                rInput.readOnly = true; 
+                sInput.readOnly = true;
+            } else {
+                newBox.classList.remove('active');
+                rInput.value = "";
+                sInput.value = "";
+                rInput.classList.remove('auto-filled');
+                sInput.classList.remove('auto-filled');
+                rInput.readOnly = false;
+                sInput.readOnly = false;
+            }
+        }
+
+        function googleCourse() {
+            const name = document.getElementById('newCourseName').value;
+            const query = name ? `${name} golf course scorecard rating slope` : "golf course slope rating lookup";
+            window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+        }
+
+        // --- SCORE SUBMISSION ---
+        function submitRound() {
+            if (!currentUserID) {
+                alert("🛑 Please enter your Golfer ID / Name first to post a score!");
+                return;
+            }
+
+            const ddVal = document.getElementById('courseDropdown').value;
+            const rating = parseFloat(document.getElementById('ratingInput').value);
+            const slope = parseFloat(document.getElementById('slopeInput').value);
+            const score = parseFloat(document.getElementById('scoreInput').value);
+            const date = document.getElementById('dateInput').value;
+
+            // Validation
+            if (!score || !rating || !slope || !date) {
+                alert("Please fill in all fields.");
+                return;
+            }
+
+            let courseName = "";
+            let teeName = "";
+
+            // Logic: Is this a new course/tee combo?
+            if (ddVal === "NEW_COURSE") {
+                courseName = document.getElementById('newCourseName').value;
+                teeName = document.getElementById('newTeeName').value;
+                
+                if (!courseName || !teeName) {
+                    alert("Please enter the new course name and tee color.");
+                    return;
+                }
+
+                // New course is saved to the SHARED list (myCourseTees)
+                courseTees.push({
+                    name: courseName,
+                    tee: teeName,
+                    rating: rating,
+                    slope: slope
+                });
+                localStorage.setItem('myCourseTees', JSON.stringify(courseTees));
+                
+                renderDropdown();
+                document.getElementById('courseDropdown').value = courseTees.length - 1;
+                handleCourseChange(); 
+            } else if (ddVal !== "") {
+                // Existing course
+                const c = courseTees[ddVal];
+                courseName = c.name;
+                teeName = c.tee;
+            } else {
+                alert("Please select a Course/Tee Combo.");
+                return;
+            }
+
+            // Calculate Differential Formula: (Score - Rating) * 113 / Slope
+            const diff = (score - rating) * 113 / slope;
+
+            // Save Round (to the current user's specific storage key)
+            const newRound = {
+                date: date,
+                course: courseName,
+                tee: teeName,
+                score: score,
+                diff: diff
+            };
+
+            savedRounds.unshift(newRound); 
+            saveRounds(); // Function to save to user's key
+
+            // Reset Score Input
+            document.getElementById('scoreInput').value = "";
+            
+            renderHistory();
+            calculateHandicap();
+        }
+
+        // --- DISPLAY & MATH ---
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            list.innerHTML = "";
+            
+            savedRounds.forEach((r, idx) => {
+                list.innerHTML += `
+                <div class="history-item">
+                    <div>
+                        <div class="h-course">${r.course} <span style="font-weight:normal; color:#888;">(${r.tee})</span></div>
+                        <div class="h-date">${r.date} <span class="h-diff">Diff: ${r.diff.toFixed(1)}</span></div>
+                    </div>
+                    <div style="display:flex; align-items:center;">
+                        <div class="h-score">${r.score}</div>
+                        <div class="delete-x" onclick="deleteRound(${idx})">×</div>
+                    </div>
+                </div>`;
+            });
+        }
+
+        function deleteRound(index) {
+            if(confirm("Delete this score?")) {
+                savedRounds.splice(index, 1);
+                saveRounds(); // Update user-specific storage
+                renderHistory();
+                calculateHandicap();
+            }
+        }
+
+        function calculateHandicap() {
+            const display = document.getElementById('displayIndex');
+            
+            if (savedRounds.length < 3) {
+                display.innerText = "--";
+                return;
+            }
+
+            // WHS Calculation: Take the best X differentials from the last 20 scores.
+            const recent = savedRounds.slice(0, 20);
+            const diffs = recent.map(r => r.diff).sort((a,b) => a - b);
+            
+            let cnt = diffs.length;
+            let avg = 0;
+
+            // WHS Table Implementation: Average the best X differentials
+            if (cnt == 3) avg = diffs[0] - 2.0;
+            else if (cnt == 4) avg = diffs[0] - 1.0;
+            else if (cnt == 5) avg = diffs[0];
+            else if (cnt == 6) avg = (diffs[0]+diffs[1])/2 - 1.0;
+            else if (cnt >= 7 && cnt <= 8) avg = (diffs[0]+diffs[1])/2;
+            else if (cnt >= 9 && cnt <= 11) avg = (diffs[0]+diffs[1]+diffs[2])/3;
+            else if (cnt >= 12 && cnt <= 14) avg = diffs.slice(0,4).reduce((a,b)=>a+b,0)/4;
+            else if (cnt >= 15 && cnt <= 16) avg = diffs.slice(0,5).reduce((a,b)=>a+b,0)/5;
+            else if (cnt >= 17 && cnt <= 18) avg = diffs.slice(0,6).reduce((a,b)=>a+b,0)/6;
+            else if (cnt == 19) avg = diffs.slice(0,7).reduce((a,b)=>a+b,0)/7;
+            else avg = diffs.slice(0,8).reduce((a,b)=>a+b,0)/8;
+
+            display.innerText = avg.toFixed(1);
+        }
+    </script>
+</body>
+</html>
